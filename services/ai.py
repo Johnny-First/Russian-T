@@ -56,4 +56,4 @@ class AI_GPT:
             bot_reply = response.choices[0].message.content
             return bot_reply
         except Exception as e:
-            return f"❌ Ошибка: {str(e)}"
+            return f""
