@@ -38,7 +38,7 @@ class AI_GPT:
                     yield content
                     
         except Exception as e:
-            yield f"❌ Ошибка: {str(e)}"
+            yield f""
 
     async def ask_gpt(self, messages: List[Dict]) -> str:
         """
