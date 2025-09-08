@@ -1,7 +1,7 @@
 from aiogram import F, types, Dispatcher
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from ..config import get_base_keyboard, get_categories_keyboard, get_learning_keyboard
+from ..config import get_base_keyboard, get_categories_keyboard, get_learning_keyboard, get_learning_keyboard_main
 from ..database.models import UserManager, ProgressManager
 
 class BaseHandlers:
@@ -41,7 +41,7 @@ class BaseHandlers:
         )
         await callback.message.edit_text(
             "📚 <b>Режим: Обучение</b>\n\nВыберите способ обучения:",
-            reply_markup=get_learning_keyboard(),
+            reply_markup=get_learning_keyboard_main(),
             parse_mode="HTML"
         )
         await callback.answer()

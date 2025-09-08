@@ -36,6 +36,18 @@ def get_admin_keyboard():
     )
 
 def get_learning_keyboard():
+    """Клавиатура обучения без кнопки случайного вопроса (для всех внутренних экранов)."""
+    return types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [types.InlineKeyboardButton(text="🔁 Повторение", callback_data="review_mode")],
+            [types.InlineKeyboardButton(text="📚 Выбрать категорию", callback_data="select_category")],
+            [types.InlineKeyboardButton(text="📊 Моя статистика", callback_data="my_stats")],
+            [types.InlineKeyboardButton(text="🔙 Назад", callback_data="start_learning")]
+        ]
+    )
+
+def get_learning_keyboard_main():
+    """Главная клавиатура обучения с кнопкой случайного вопроса (только на первом экране)."""
     return types.InlineKeyboardMarkup(
         inline_keyboard=[
             [types.InlineKeyboardButton(text="🎯 Случайный вопрос", callback_data="random_question")],
@@ -51,7 +63,7 @@ def get_repeat_session_completed_keyboard():
     return types.InlineKeyboardMarkup(
         inline_keyboard=[
             [types.InlineKeyboardButton(text="🔄 Повторить сессию", callback_data="restart_repeat_session")],
-            [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            [types.InlineKeyboardButton(text="🔙 Назад", callback_data="start_learning")]
         ]
     )
 async def admin_get_categories_keyboard():
@@ -105,8 +117,7 @@ async def get_categories_keyboard():
                 row = []
         if row:
             buttons.append(row)
-    buttons.append([types.InlineKeyboardButton(text="🎯 Случайный вопрос", callback_data="random_question")])
-    buttons.append([types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+    buttons.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="start_learning")])
     return types.InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_question_keyboard(answers):
@@ -126,7 +137,7 @@ def get_question_navigation_keyboard(question_id, category_id):
         inline_keyboard=[
             [types.InlineKeyboardButton(text="🔄 Следующий вопрос", callback_data=f"next_question_{category_id}")],
             [types.InlineKeyboardButton(text="📚 К категориям", callback_data="select_category")],
-            [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            [types.InlineKeyboardButton(text="🔙 Назад", callback_data="start_learning")]
         ]
     )
 
