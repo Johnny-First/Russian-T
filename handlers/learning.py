@@ -240,34 +240,6 @@ class LearningHandlers:
             # Обычный режим - записываем статистику (только при первом ответе)
             from ..database.models import ProgressManager
             await ProgressManager.record_answer(callback.from_user.id, question_id, answer_id, is_correct)
-            
-            # Если ответ неправильный, показываем тот же вопрос снова
-            if not is_correct:
-                # Получаем информацию о правильном ответе
-                question_data = await QuestionManager.get_question_with_answers(question_id)
-                correct_answer_text = None
-                for answer in question_data['answers']:
-                    if answer[2]:  # is_correct
-                        correct_answer_text = answer[1]
-                        break
-                
-                # Формируем ответ
-                result_text = f"❌ <b>Неправильно!</b>\n\nПравильный ответ: {correct_answer_text}"
-                
-                # Добавляем объяснение, если есть
-                question = question_data['question']
-                if question[3]:  # explanation
-                    result_text += f"\n\n💡 <b>Объяснение:</b>\n{question[3]}"
-                
-                result_text += f"\n\n🔄 <b>Попробуйте еще раз:</b>"
-                
-                await callback.message.edit_text(
-                    result_text,
-                    reply_markup=get_question_keyboard(question_data['answers']),
-                    parse_mode="HTML"
-                )
-                await callback.answer()
-                return
         
         # Получаем информацию о правильном ответе
         question_data = await QuestionManager.get_question_with_answers(question_id)

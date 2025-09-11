@@ -424,7 +424,7 @@ class QuestionManager:
 
     @staticmethod
     async def get_unseen_random_question_by_category(user_id: int, category_id: int):
-        """Случайный активный вопрос по категории, который пользователь еще не видел"""
+        """Случайный активный вопрос по категории, который пользователь еще не видел или видел неправильно"""
         async with aiosqlite.connect(DB_PATH) as conn:
             async with conn.execute(
                 '''
@@ -448,7 +448,7 @@ class QuestionManager:
 
     @staticmethod
     async def get_unseen_random_question_global(user_id: int):
-        """Случайный активный вопрос из любых категорий, который пользователь еще не видел"""
+        """Случайный активный вопрос из любых категорий, который пользователь еще не видел или видел неправильно"""
         async with aiosqlite.connect(DB_PATH) as conn:
             async with conn.execute(
                 '''
@@ -526,15 +526,15 @@ class ProgressManager:
     async def record_answer(user_id: int, question_id: int, answer_id: int, is_correct: bool):
         """Запись ответа пользователя (только для первого ответа)"""
         async with aiosqlite.connect(DB_PATH) as conn:
-            # Проверяем, отвечал ли пользователь на этот вопрос ранее
+            # Проверяем, отвечал ли пользователь на этот вопрос ранее правильно
             async with conn.execute(
-                'SELECT 1 FROM user_answers WHERE user_id = ? AND question_id = ? LIMIT 1',
+                'SELECT 1 FROM user_answers WHERE user_id = ? AND question_id = ? AND is_correct = 1 LIMIT 1',
                 (user_id, question_id)
             ) as cursor:
-                already_answered = await cursor.fetchone()
+                already_answered_correctly = await cursor.fetchone()
             
-            if already_answered:
-                # Если уже отвечал, не изменяем статистику
+            if already_answered_correctly:
+                # Если уже отвечал правильно, не изменяем статистику
                 return
             
             # Записываем ответ
@@ -650,7 +650,7 @@ class ProgressManager:
         async with aiosqlite.connect(DB_PATH) as conn:
             async with conn.execute(
                 '''SELECT 
-                    COUNT(DISTINCT ua.question_id) as total_answered,
+                    COUNT(*) as total_answered,
                     SUM(CASE WHEN ua.is_correct = 1 THEN 1 ELSE 0 END) as total_correct,
                     COUNT(DISTINCT q.category_id) as categories_studied
                 FROM user_answers ua
@@ -697,11 +697,11 @@ class ProgressManager:
             async with conn.execute(
                 '''SELECT 
                     c.name,
-                    COUNT(DISTINCT ua.question_id) as total_questions_answered,
+                    COUNT(*) as total_questions_answered,
                     SUM(CASE WHEN ua.is_correct = 1 THEN 1 ELSE 0 END) as total_correct_answers,
                     CASE 
-                        WHEN COUNT(DISTINCT ua.question_id) > 0 
-                        THEN ROUND((SUM(CASE WHEN ua.is_correct = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(DISTINCT ua.question_id)), 1)
+                        WHEN COUNT(*) > 0 
+                        THEN ROUND((SUM(CASE WHEN ua.is_correct = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*)), 1)
                         ELSE 0 
                     END as accuracy
                 FROM user_answers ua
