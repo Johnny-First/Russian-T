@@ -524,7 +524,7 @@ class ProgressManager:
     
     @staticmethod
     async def record_answer(user_id: int, question_id: int, answer_id: int, is_correct: bool):
-        """Запись ответа пользователя"""
+        """Запись ответа пользователя (только для первого ответа)"""
         async with aiosqlite.connect(DB_PATH) as conn:
             # Записываем ответ
             await conn.execute(
@@ -543,6 +543,8 @@ class ProgressManager:
                 category_id = result[0]
                 
                 # Обновляем или создаем прогресс по категории
+                # При правильном ответе: +1 к правильным, +1 к общим
+                # При неправильном ответе: +0 к правильным, +1 к общим
                 await conn.execute(
                     '''INSERT OR REPLACE INTO user_progress 
                     (user_id, category_id, questions_answered, correct_answers, last_activity)
@@ -656,6 +658,30 @@ class ProgressManager:
                 WHERE c.is_active = 1
                 GROUP BY c.id, c.name
                 ORDER BY c.name''',
+            ) as cursor:
+                stats = await cursor.fetchall()
+        return stats
+    
+    @staticmethod
+    async def get_user_stats_by_categories(user_id: int):
+        """Получить статистику пользователя по категориям"""
+        async with aiosqlite.connect(DB_PATH) as conn:
+            async with conn.execute(
+                '''SELECT 
+                    c.name,
+                    SUM(up.questions_answered) as total_questions_answered,
+                    SUM(up.correct_answers) as total_correct_answers,
+                    CASE 
+                        WHEN SUM(up.questions_answered) > 0 
+                        THEN ROUND((SUM(up.correct_answers) * 100.0 / SUM(up.questions_answered)), 1)
+                        ELSE 0 
+                    END as accuracy
+                FROM user_progress up
+                JOIN categories c ON up.category_id = c.id
+                WHERE up.user_id = ? AND c.is_active = 1
+                GROUP BY c.name
+                ORDER BY c.name''',
+                (user_id,)
             ) as cursor:
                 stats = await cursor.fetchall()
         return stats
