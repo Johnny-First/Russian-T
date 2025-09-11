@@ -237,53 +237,37 @@ class LearningHandlers:
             # В режиме повторения НЕ записываем в БД, НЕ изменяем статистику
             pass
         else:
-            # Обычный режим - проверяем, отвечал ли уже на этот вопрос
-            from ..database.models import ProgressManager, UserManager
-            already_answered = await ProgressManager.user_has_answered_question(callback.from_user.id, question_id)
+            # Обычный режим - записываем статистику (только при первом ответе)
+            from ..database.models import ProgressManager
+            await ProgressManager.record_answer(callback.from_user.id, question_id, answer_id, is_correct)
             
-            if not already_answered:
-                # Первый ответ на вопрос - записываем статистику
-                await ProgressManager.record_answer(callback.from_user.id, question_id, answer_id, is_correct)
-                await UserManager.update_user_stats(callback.from_user.id, is_correct)
+            # Если ответ неправильный, показываем тот же вопрос снова
+            if not is_correct:
+                # Получаем информацию о правильном ответе
+                question_data = await QuestionManager.get_question_with_answers(question_id)
+                correct_answer_text = None
+                for answer in question_data['answers']:
+                    if answer[2]:  # is_correct
+                        correct_answer_text = answer[1]
+                        break
                 
-                # Если ответ неправильный, показываем тот же вопрос снова
-                if not is_correct:
-                    # Получаем информацию о правильном ответе
-                    question_data = await QuestionManager.get_question_with_answers(question_id)
-                    correct_answer_text = None
-                    for answer in question_data['answers']:
-                        if answer[2]:  # is_correct
-                            correct_answer_text = answer[1]
-                            break
-                    
-                    # Формируем ответ
-                    result_text = f"❌ <b>Неправильно!</b>\n\nПравильный ответ: {correct_answer_text}"
-                    
-                    # Добавляем объяснение, если есть
-                    question = question_data['question']
-                    if question[3]:  # explanation
-                        result_text += f"\n\n💡 <b>Объяснение:</b>\n{question[3]}"
-                    
-                    result_text += f"\n\n🔄 <b>Попробуйте еще раз:</b>"
-                    
-                    await callback.message.edit_text(
-                        result_text,
-                        reply_markup=get_question_keyboard(question_data['answers']),
-                        parse_mode="HTML"
-                    )
-                    await callback.answer()
-                    return
-            else:
-                # Уже отвечал на этот вопрос - не изменяем статистику
-                # Но если сейчас правильно, записываем в историю
-                if is_correct:
-                    from ..database.models import aiosqlite, DB_PATH
-                    async with aiosqlite.connect(DB_PATH) as conn:
-                        await conn.execute(
-                            'INSERT INTO user_answers (user_id, question_id, answer_id, is_correct) VALUES (?, ?, ?, 1)',
-                            (callback.from_user.id, question_id, answer_id)
-                        )
-                        await conn.commit()
+                # Формируем ответ
+                result_text = f"❌ <b>Неправильно!</b>\n\nПравильный ответ: {correct_answer_text}"
+                
+                # Добавляем объяснение, если есть
+                question = question_data['question']
+                if question[3]:  # explanation
+                    result_text += f"\n\n💡 <b>Объяснение:</b>\n{question[3]}"
+                
+                result_text += f"\n\n🔄 <b>Попробуйте еще раз:</b>"
+                
+                await callback.message.edit_text(
+                    result_text,
+                    reply_markup=get_question_keyboard(question_data['answers']),
+                    parse_mode="HTML"
+                )
+                await callback.answer()
+                return
         
         # Получаем информацию о правильном ответе
         question_data = await QuestionManager.get_question_with_answers(question_id)
@@ -362,7 +346,7 @@ class LearningHandlers:
         overall_progress = await ProgressManager.get_user_overall_progress(callback.from_user.id)
         category_stats = await ProgressManager.get_user_stats_by_categories(callback.from_user.id)
          
-        if not overall_progress or not category_stats:
+        if not overall_progress:
             await callback.message.edit_text(
                 "📊 У вас пока нет статистики. Начните изучение!",
                 reply_markup=get_learning_keyboard()
@@ -380,9 +364,12 @@ class LearningHandlers:
         stats_text += f"• Изучено категорий: {overall_progress['categories_studied']}\n\n"
         
         # Статистика по категориям
-        stats_text += f"📚 <b>По категориям:</b>\n"
-        for category_name, total_questions_answered, total_correct_answers, accuracy in category_stats:
-            stats_text += f"• <b>{category_name}:</b> {total_correct_answers}/{total_questions_answered} ({accuracy}%)\n"
+        if category_stats:
+            stats_text += f"📚 <b>По категориям:</b>\n"
+            for category_name, total_questions_answered, total_correct_answers, accuracy in category_stats:
+                stats_text += f"• <b>{category_name}:</b> {total_correct_answers}/{total_questions_answered} ({accuracy}%)\n"
+        else:
+            stats_text += f"📚 <b>По категориям:</b>\n• Нет данных по категориям\n"
         
         await callback.message.edit_text(
             stats_text,

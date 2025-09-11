@@ -526,6 +526,17 @@ class ProgressManager:
     async def record_answer(user_id: int, question_id: int, answer_id: int, is_correct: bool):
         """Запись ответа пользователя (только для первого ответа)"""
         async with aiosqlite.connect(DB_PATH) as conn:
+            # Проверяем, отвечал ли пользователь на этот вопрос ранее
+            async with conn.execute(
+                'SELECT 1 FROM user_answers WHERE user_id = ? AND question_id = ? LIMIT 1',
+                (user_id, question_id)
+            ) as cursor:
+                already_answered = await cursor.fetchone()
+            
+            if already_answered:
+                # Если уже отвечал, не изменяем статистику
+                return
+            
             # Записываем ответ
             await conn.execute(
                 'INSERT INTO user_answers (user_id, question_id, answer_id, is_correct) VALUES (?, ?, ?, ?)',
@@ -546,13 +557,28 @@ class ProgressManager:
                 # При правильном ответе: +1 к правильным, +1 к общим
                 # При неправильном ответе: +0 к правильным, +1 к общим
                 await conn.execute(
-                    '''INSERT OR REPLACE INTO user_progress 
+                    '''INSERT OR IGNORE INTO user_progress 
                     (user_id, category_id, questions_answered, correct_answers, last_activity)
-                    VALUES (?, ?, 
-                        COALESCE((SELECT questions_answered FROM user_progress WHERE user_id = ? AND category_id = ?), 0) + 1,
-                        COALESCE((SELECT correct_answers FROM user_progress WHERE user_id = ? AND category_id = ?), 0) + ?,
-                        CURRENT_TIMESTAMP)''',
-                    (user_id, category_id, user_id, category_id, user_id, category_id, 1 if is_correct else 0)
+                    VALUES (?, ?, 0, 0, CURRENT_TIMESTAMP)''',
+                    (user_id, category_id)
+                )
+                
+                await conn.execute(
+                    '''UPDATE user_progress 
+                    SET questions_answered = questions_answered + 1,
+                        correct_answers = correct_answers + ?,
+                        last_activity = CURRENT_TIMESTAMP
+                    WHERE user_id = ? AND category_id = ?''',
+                    (1 if is_correct else 0, user_id, category_id)
+                )
+                
+                # Обновляем общую статистику пользователя
+                await conn.execute(
+                    '''UPDATE users 
+                    SET total_questions = total_questions + 1,
+                        correct_answers = correct_answers + ?
+                    WHERE user_id = ?''',
+                    (1 if is_correct else 0, user_id)
                 )
             
             await conn.commit()
@@ -624,10 +650,12 @@ class ProgressManager:
         async with aiosqlite.connect(DB_PATH) as conn:
             async with conn.execute(
                 '''SELECT 
-                    SUM(questions_answered) as total_answered,
-                    SUM(correct_answers) as total_correct,
-                    COUNT(DISTINCT category_id) as categories_studied
-                FROM user_progress WHERE user_id = ?''',
+                    COUNT(DISTINCT ua.question_id) as total_answered,
+                    SUM(CASE WHEN ua.is_correct = 1 THEN 1 ELSE 0 END) as total_correct,
+                    COUNT(DISTINCT q.category_id) as categories_studied
+                FROM user_answers ua
+                JOIN questions q ON ua.question_id = q.id
+                WHERE ua.user_id = ?''',
                 (user_id,)
             ) as cursor:
                 result = await cursor.fetchone()
@@ -669,17 +697,18 @@ class ProgressManager:
             async with conn.execute(
                 '''SELECT 
                     c.name,
-                    SUM(up.questions_answered) as total_questions_answered,
-                    SUM(up.correct_answers) as total_correct_answers,
+                    COUNT(DISTINCT ua.question_id) as total_questions_answered,
+                    SUM(CASE WHEN ua.is_correct = 1 THEN 1 ELSE 0 END) as total_correct_answers,
                     CASE 
-                        WHEN SUM(up.questions_answered) > 0 
-                        THEN ROUND((SUM(up.correct_answers) * 100.0 / SUM(up.questions_answered)), 1)
+                        WHEN COUNT(DISTINCT ua.question_id) > 0 
+                        THEN ROUND((SUM(CASE WHEN ua.is_correct = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(DISTINCT ua.question_id)), 1)
                         ELSE 0 
                     END as accuracy
-                FROM user_progress up
-                JOIN categories c ON up.category_id = c.id
-                WHERE up.user_id = ? AND c.is_active = 1
-                GROUP BY c.name
+                FROM user_answers ua
+                JOIN questions q ON ua.question_id = q.id
+                JOIN categories c ON q.category_id = c.id
+                WHERE ua.user_id = ? AND c.is_active = 1
+                GROUP BY c.id, c.name
                 ORDER BY c.name''',
                 (user_id,)
             ) as cursor:

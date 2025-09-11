@@ -13,7 +13,6 @@ class BaseHandlers:
         dp.callback_query.register(self.my_stats, F.data == "my_stats")
         dp.callback_query.register(self.about, F.data == "about")
         dp.callback_query.register(self.main_menu, F.data == "main_menu")
-        dp.callback_query.register(self.answer_question, F.data.startswith("answer_"))
 
     async def start_cmd(self, message: types.Message, state: FSMContext):
         await state.clear()
@@ -118,78 +117,17 @@ class BaseHandlers:
             parse_mode="HTML"
         )
 
-    async def answer_question(self, callback: types.CallbackQuery, state: FSMContext):
-        """Обрабатывает ответ пользователя на вопрос"""
-        token = callback.data.split("_", 1)[1]
-        if not token.isdigit():
-            await callback.answer()
-            return
-        answer_id = int(token)
-        
-        data = await state.get_data()
-        question_id = data.get('current_question_id')
-        correct_answer_id = data.get('correct_answer_id')
-        
-        if not question_id or correct_answer_id is None:
-            await callback.answer("Ошибка: данные вопроса не найдены", show_alert=True)
-            return
-        
-        is_correct = answer_id == correct_answer_id
-        
-        # Записываем ответ только если это первый ответ на этот вопрос для пользователя (статистику не меняем при повторном ответе)
-        from ..database.models import ProgressManager, UserManager
-        already = await ProgressManager.user_has_answered_question(callback.from_user.id, question_id)
-        if not already:
-            await ProgressManager.record_answer(callback.from_user.id, question_id, answer_id, is_correct)
-            await UserManager.update_user_stats(callback.from_user.id, is_correct)
-        else:
-            # Если уже отвечал, но сейчас правильно — зафиксируем правильный в истории (без изменения статистики)
-            if is_correct:
-                from ..database.models import aiosqlite, DB_PATH
-                async with aiosqlite.connect(DB_PATH) as conn:
-                    await conn.execute(
-                        'INSERT INTO user_answers (user_id, question_id, answer_id, is_correct) VALUES (?, ?, ?, 1)',
-                        (callback.from_user.id, question_id, answer_id)
-                    )
-                    await conn.commit()
-        
-        # Получаем информацию о правильном ответе
-        from ..database.models import QuestionManager
-        question_data = await QuestionManager.get_question_with_answers(question_id)
-        correct_answer_text = None
-        for answer in question_data['answers']:
-            if answer[2]:  # is_correct
-                correct_answer_text = answer[1]
-                break
-        
-        # Формируем ответ
-        if is_correct:
-            result_text = "✅ <b>Правильно!</b>"
-        else:
-            result_text = f"❌ <b>Неправильно!</b>\n\nПравильный ответ: {correct_answer_text}"
-        
-        # Добавляем объяснение, если есть
-        question = question_data['question']
-        if question[3]:  # explanation
-            result_text += f"\n\n💡 <b>Объяснение:</b>\n{question[3]}"
-        
-        from ..config.keyboards import get_question_navigation_keyboard
-        await callback.message.edit_text(
-            result_text,
-            reply_markup=get_question_navigation_keyboard(question_id, data.get('current_category_id')),
-            parse_mode="HTML"
-        )
-        await callback.answer()
 
 
     async def my_stats(self, callback: types.CallbackQuery, state: FSMContext):
-        """Показывает статистику пользователя"""
-        from ..database.models import UserManager, ProgressManager
+        """Показывает статистику пользователя по категориям"""
+        from ..database.models import ProgressManager
         
-        user_stats = await UserManager.get_user_stats(callback.from_user.id)
+        # Получаем общую статистику
         overall_progress = await ProgressManager.get_user_overall_progress(callback.from_user.id)
-        
-        if not user_stats:
+        category_stats = await ProgressManager.get_user_stats_by_categories(callback.from_user.id)
+         
+        if not overall_progress:
             await callback.message.edit_text(
                 "📊 У вас пока нет статистики. Начните изучение!",
                 reply_markup=get_learning_keyboard()
@@ -197,13 +135,22 @@ class BaseHandlers:
             await callback.answer()
             return
         
-        stats_text = f"📊 <b>Ваша статистика:</b>\n\n"
-        stats_text += f"🎯 Всего вопросов: {user_stats['total_questions']}\n"
-        stats_text += f"✅ Правильных ответов: {user_stats['correct_answers']}\n"
-        stats_text += f"📈 Точность: {user_stats['accuracy']}%\n"
+        stats_text = f"📊 <b>Ваша статистика по категориям:</b>\n\n"
         
-        if overall_progress:
-            stats_text += f"\n📚 Изучено категорий: {overall_progress['categories_studied']}"
+        # Общая статистика
+        stats_text += f"🎯 <b>Общая статистика:</b>\n"
+        stats_text += f"• Всего вопросов: {overall_progress['total_questions_answered']}\n"
+        stats_text += f"• Правильных ответов: {overall_progress['total_correct_answers']}\n"
+        stats_text += f"• Точность: {overall_progress['accuracy']}%\n"
+        stats_text += f"• Изучено категорий: {overall_progress['categories_studied']}\n\n"
+        
+        # Статистика по категориям
+        if category_stats:
+            stats_text += f"📚 <b>По категориям:</b>\n"
+            for category_name, total_questions_answered, total_correct_answers, accuracy in category_stats:
+                stats_text += f"• <b>{category_name}:</b> {total_correct_answers}/{total_questions_answered} ({accuracy}%)\n"
+        else:
+            stats_text += f"📚 <b>По категориям:</b>\n• Нет данных по категориям\n"
         
         await callback.message.edit_text(
             stats_text,
